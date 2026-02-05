@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Subir imagen a Drive</title>
+  <title>Subir imagen a n8n (Drive + OCR + Sheets)</title>
   <style>
     body { font-family: Arial, sans-serif; max-width: 560px; margin: 30px auto; padding: 0 14px; }
     .box { border: 1px solid #ddd; padding: 16px; border-radius: 10px; }
@@ -13,21 +13,27 @@
     .ok { background: #e9ffe9; }
     .err { background: #ffe9e9; }
     code { display:block; white-space:pre-wrap; word-break:break-word; margin-top:8px; }
+    .small { font-size: 12px; opacity: .8; margin-top: 8px; }
   </style>
 </head>
 <body>
-  <h2>Subir JPG/PNG a Google Drive</h2>
+  <h2>Subir JPG/PNG (n8n → Drive → OCR → Sheets)</h2>
 
   <div class="box">
     <input id="file" type="file" accept="image/png,image/jpeg" />
     <button id="btn">Subir</button>
+    <div class="small">
+      Si estás probando, usá la URL <b>webhook-test</b> de n8n (modo “Listen for test event”).
+    </div>
     <div id="out" class="msg" style="display:none"></div>
   </div>
 
 <script>
-  const WEBAPP_URL = "https://script.google.com/macros/s/AKfycbyT_Ap5M5KGi4qALkw_FII2VrgTJrbOrNtFy4cEX6V-3vtdfoglVa-85EWJtf3VizU8/exec";
-  const MAX_MB = 6; // ajustable
+  // ✅ REEMPLAZAR ESTO por tu Webhook URL de n8n (test o production)
+  // Ejemplo: "https://tuinstancia.app.n8n.cloud/webhook-test/upload-foto"
+  const WEBHOOK_URL = "PEGAR_AQUI_TU_WEBHOOK_DE_N8N";
 
+  const MAX_MB = 8; // ajustable
   const fileInput = document.getElementById("file");
   const btn = document.getElementById("btn");
   const out = document.getElementById("out");
@@ -47,12 +53,16 @@
     });
   }
 
-  async function postJsonTextPlain(payload) {
-    return fetch(WEBAPP_URL, {
+  async function postJson(payload) {
+    const res = await fetch(WEBHOOK_URL, {
       method: "POST",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
+    const raw = await res.text();
+    let data = null;
+    try { data = JSON.parse(raw); } catch {}
+    return { res, raw, data };
   }
 
   btn.addEventListener("click", async () => {
@@ -72,39 +82,36 @@
     show("Subiendo…", "");
 
     try {
+      if (!WEBHOOK_URL || WEBHOOK_URL.includes("PEGAR_AQUI")) {
+        throw new Error("Tenés que pegar tu WEBHOOK_URL de n8n en el código (arriba).");
+      }
+
       const base64 = await readAsDataURL(file);
 
       const payload = {
         fileName: file.name,
         mimeType: file.type,
-        base64
+        base64 // data:image/...;base64,....
       };
 
-      const res = await postJsonTextPlain(payload);
-
-      const raw = await res.text(); // SIEMPRE leer texto para mostrar errores reales
-      let data = null;
-      try { data = JSON.parse(raw); } catch {}
+      const { res, raw, data } = await postJson(payload);
 
       if (!res.ok) {
-        throw new Error(`HTTP ${res.status}. Respuesta: ${raw.slice(0, 500)}`);
+        throw new Error(`HTTP ${res.status}. Respuesta: ${raw.slice(0, 1000)}`);
       }
 
-      // Si no es JSON, mostrarlo igual
-      if (!data) {
-        throw new Error("El WebApp no devolvió JSON. Respuesta: " + raw.slice(0, 500));
+      // Si n8n devuelve JSON, lo mostramos; si no, mostramos texto
+      if (data && typeof data === "object") {
+        show(
+          `✅ OK<br>` +
+          (data.rows != null ? `Filas agregadas: <b>${data.rows}</b><br>` : "") +
+          (data.fileUrl ? `Drive: <a href="${data.fileUrl}" target="_blank" rel="noreferrer">${data.fileUrl}</a><br>` : "") +
+          `<code>${JSON.stringify(data, null, 2)}</code>`,
+          "ok"
+        );
+      } else {
+        show(`✅ OK<br><code>${raw.slice(0, 1500)}</code>`, "ok");
       }
-
-      if (!data.ok) {
-        throw new Error(data.error || ("Respuesta: " + raw.slice(0, 500)));
-      }
-
-      show(
-        `✅ Guardado OK<br>` +
-        (data.fileName ? `Archivo: <b>${data.fileName}</b><br>` : "") +
-        (data.viewUrl ? `Abrir: <a href="${data.viewUrl}" target="_blank" rel="noreferrer">${data.viewUrl}</a>` : ""),
-        "ok"
-      );
 
       fileInput.value = "";
 
