@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Subir imagen a Drive</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 560px; margin: 30px auto; padding: 0 14px; }
+    .box { border: 1px solid #ddd; padding: 16px; border-radius: 10px; }
+    button { width: 100%; padding: 12px; font-size: 16px; margin-top: 12px; cursor: pointer; }
+    input { width: 100%; margin-top: 10px; }
+    .msg { margin-top: 12px; padding: 10px; border-radius: 8px; background: #f6f6f6; }
+    .ok { background: #e9ffe9; }
+    .err { background: #ffe9e9; }
+    a { word-break: break-all; }
+  </style>
+</head>
+<body>
+  <h2>Subir JPG/PNG a Google Drive</h2>
+
+  <div class="box">
+    <input id="file" type="file" accept="image/png,image/jpeg" />
+    <button id="btn">Subir</button>
+    <div id="out" class="msg" style="display:none"></div>
+  </div>
+
+<script>
+  const WEBAPP_URL = "PEGAR_ACA_TU_URL_DEL_WEBAPP"; // .../exec
+
+  const fileInput = document.getElementById("file");
+  const btn = document.getElementById("btn");
+  const out = document.getElementById("out");
+
+  function show(msg, type) {
+    out.style.display = "block";
+    out.className = "msg " + (type || "");
+    out.innerHTML = msg;
+  }
+
+  function readAsDataURL(file) {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result);
+      r.onerror = reject;
+      r.readAsDataURL(file);
+    });
+  }
+
+  btn.addEventListener("click", async () => {
+    const file = fileInput.files && fileInput.files[0];
+    if (!file) return show("Elegí una imagen JPG o PNG.", "err");
+
+    if (!["image/png", "image/jpeg"].includes(file.type)) {
+      return show("Formato inválido. Solo PNG o JPG.", "err");
+    }
+
+    btn.disabled = true;
+    show("Subiendo…", "");
+
+    try {
+      const base64 = await readAsDataURL(file);
+
+      const res = await fetch(WEBAPP_URL, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" }, // evita preflight CORS en muchos casos
+        body: JSON.stringify({
+          fileName: file.name,
+          mimeType: file.type,
+          base64
+        })
+      });
+
+      const data = await res.json();
+
+      if (!data.ok) {
+        throw new Error(data.error || "Error desconocido");
+      }
+
+      show(
+        `✅ Guardado en Drive: <b>${data.fileName}</b><br>` +
+        `Abrir: <a href="${data.viewUrl}" target="_blank" rel="noreferrer">${data.viewUrl}</a>`,
+        "ok"
+      );
+
+      fileInput.value = "";
+    } catch (e) {
+      show("❌ " + e.message, "err");
+    } finally {
+      btn.disabled = false;
+    }
+  });
+</script>
+</body>
+</html>
