@@ -12,7 +12,7 @@
     .msg { margin-top: 12px; padding: 10px; border-radius: 8px; background: #f6f6f6; }
     .ok { background: #e9ffe9; }
     .err { background: #ffe9e9; }
-    a { word-break: break-all; }
+    code { display:block; white-space:pre-wrap; word-break:break-word; margin-top:8px; }
   </style>
 </head>
 <body>
@@ -25,17 +25,17 @@
   </div>
 
 <script>
-  // ✅ TU WEB APP (exec)
   const WEBAPP_URL = "https://script.google.com/macros/s/AKfycbyT_Ap5M5KGi4qALkw_FII2VrgTJrbOrNtFy4cEX6V-3vtdfoglVa-85EWJtf3VizU8/exec";
+  const MAX_MB = 6; // ajustable
 
   const fileInput = document.getElementById("file");
   const btn = document.getElementById("btn");
   const out = document.getElementById("out");
 
-  function show(msg, type) {
+  function show(html, type) {
     out.style.display = "block";
     out.className = "msg " + (type || "");
-    out.innerHTML = msg;
+    out.innerHTML = html;
   }
 
   function readAsDataURL(file) {
@@ -47,6 +47,14 @@
     });
   }
 
+  async function postJsonTextPlain(payload) {
+    return fetch(WEBAPP_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(payload),
+    });
+  }
+
   btn.addEventListener("click", async () => {
     const file = fileInput.files && fileInput.files[0];
     if (!file) return show("Elegí una imagen JPG o PNG.", "err");
@@ -55,45 +63,53 @@
       return show("Formato inválido. Solo PNG o JPG.", "err");
     }
 
+    const mb = file.size / (1024 * 1024);
+    if (mb > MAX_MB) {
+      return show(`La imagen pesa ${mb.toFixed(2)} MB. Máximo permitido: ${MAX_MB} MB.`, "err");
+    }
+
     btn.disabled = true;
     show("Subiendo…", "");
 
     try {
       const base64 = await readAsDataURL(file);
 
-      // ⚠️ Importante: Apps Script suele responder mejor a text/plain
-      const res = await fetch(WEBAPP_URL, {
-        method: "POST",
-        headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: JSON.stringify({
-          fileName: file.name,
-          mimeType: file.type,
-          base64
-        })
-      });
+      const payload = {
+        fileName: file.name,
+        mimeType: file.type,
+        base64
+      };
 
-      // Si el script devuelve texto no-JSON, esto fallará: lo capturamos
-      const text = await res.text();
-      let data;
-      try {
-        data = JSON.parse(text);
-      } catch {
-        throw new Error("El WebApp no devolvió JSON. Respuesta: " + text.slice(0, 200));
+      const res = await postJsonTextPlain(payload);
+
+      const raw = await res.text(); // SIEMPRE leer texto para mostrar errores reales
+      let data = null;
+      try { data = JSON.parse(raw); } catch {}
+
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}. Respuesta: ${raw.slice(0, 500)}`);
       }
 
-      if (!data.ok) throw new Error(data.error || "Error desconocido");
+      // Si no es JSON, mostrarlo igual
+      if (!data) {
+        throw new Error("El WebApp no devolvió JSON. Respuesta: " + raw.slice(0, 500));
+      }
+
+      if (!data.ok) {
+        throw new Error(data.error || ("Respuesta: " + raw.slice(0, 500)));
+      }
 
       show(
-        `✅ Guardado en Drive: <b>${data.fileName || file.name}</b><br>` +
-        (data.viewUrl
-          ? `Abrir: <a href="${data.viewUrl}" target="_blank" rel="noreferrer">${data.viewUrl}</a>`
-          : "Guardado OK (sin URL de vista en la respuesta)."),
+        `✅ Guardado OK<br>` +
+        (data.fileName ? `Archivo: <b>${data.fileName}</b><br>` : "") +
+        (data.viewUrl ? `Abrir: <a href="${data.viewUrl}" target="_blank" rel="noreferrer">${data.viewUrl}</a>` : ""),
         "ok"
       );
 
       fileInput.value = "";
+
     } catch (e) {
-      show("❌ " + e.message, "err");
+      show(`❌ Error al subir.<br><code>${String(e.message || e)}</code>`, "err");
     } finally {
       btn.disabled = false;
     }
