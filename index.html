@@ -1,126 +1,65 @@
 <!doctype html>
 <html lang="es">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Subir imagen a n8n (Drive + OCR + Sheets)</title>
-  <style>
-    body { font-family: Arial, sans-serif; max-width: 560px; margin: 30px auto; padding: 0 14px; }
-    .box { border: 1px solid #ddd; padding: 16px; border-radius: 10px; }
-    button { width: 100%; padding: 12px; font-size: 16px; margin-top: 12px; cursor: pointer; }
-    input { width: 100%; margin-top: 10px; }
-    .msg { margin-top: 12px; padding: 10px; border-radius: 8px; background: #f6f6f6; }
-    .ok { background: #e9ffe9; }
-    .err { background: #ffe9e9; }
-    code { display:block; white-space:pre-wrap; word-break:break-word; margin-top:8px; }
-    .small { font-size: 12px; opacity: .8; margin-top: 8px; }
-  </style>
-</head>
-<body>
-  <h2>Subir JPG/PNG (n8n → Drive → OCR → Sheets)</h2>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Subir imagen</title>
 
-  <div class="box">
-    <input id="file" type="file" accept="image/png,image/jpeg" />
-    <button id="btn">Subir</button>
-    <div class="small">
-      Si estás probando, usá la URL <b>webhook-test</b> de n8n (modo “Listen for test event”).
-    </div>
-    <div id="out" class="msg" style="display:none"></div>
-  </div>
+<style>
+body { font-family: Arial; max-width: 500px; margin: 40px auto; }
+button { width:100%; padding:15px; font-size:18px; }
+.msg { margin-top:15px; padding:10px; border-radius:8px; }
+.ok { background:#e6ffe6 }
+.err { background:#ffe6e6 }
+</style>
+</head>
+
+<body>
+
+<h2>Subir foto</h2>
+
+<input id="file" type="file" accept="image/jpeg,image/png">
+<button onclick="enviar()">Subir</button>
+
+<div id="msg" class="msg" style="display:none"></div>
 
 <script>
-  // ✅ REEMPLAZAR ESTO por tu Webhook URL de n8n (test o production)
-  // Ejemplo: "https://tuinstancia.app.n8n.cloud/webhook-test/upload-foto"
-  const WEBHOOK_URL = "PEGAR_AQUI_TU_WEBHOOK_DE_N8N";
+const WEBHOOK_URL = "https://thomasloke1.app.n8n.cloud/webhook-test/Subir%20Foto%20Carpeta%20Drive";
 
-  const MAX_MB = 8; // ajustable
-  const fileInput = document.getElementById("file");
-  const btn = document.getElementById("btn");
-  const out = document.getElementById("out");
+function show(t,ok){
+  const m=document.getElementById("msg");
+  m.style.display="block";
+  m.className="msg "+(ok?"ok":"err");
+  m.innerHTML=t;
+}
 
-  function show(html, type) {
-    out.style.display = "block";
-    out.className = "msg " + (type || "");
-    out.innerHTML = html;
-  }
+function enviar(){
+  const f=document.getElementById("file").files[0];
+  if(!f){ show("Elegí imagen",0); return; }
 
-  function readAsDataURL(file) {
-    return new Promise((resolve, reject) => {
-      const r = new FileReader();
-      r.onload = () => resolve(r.result);
-      r.onerror = reject;
-      r.readAsDataURL(file);
-    });
-  }
+  const r=new FileReader();
+  r.onload=async()=>{
+    try{
+      const res=await fetch(WEBHOOK_URL,{
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body:JSON.stringify({
+          fileName:f.name,
+          mimeType:f.type,
+          base64:r.result
+        })
+      });
 
-  async function postJson(payload) {
-    const res = await fetch(WEBHOOK_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const raw = await res.text();
-    let data = null;
-    try { data = JSON.parse(raw); } catch {}
-    return { res, raw, data };
-  }
+      const txt=await res.text();
+      show("OK<br>"+txt,1);
 
-  btn.addEventListener("click", async () => {
-    const file = fileInput.files && fileInput.files[0];
-    if (!file) return show("Elegí una imagen JPG o PNG.", "err");
-
-    if (!["image/png", "image/jpeg"].includes(file.type)) {
-      return show("Formato inválido. Solo PNG o JPG.", "err");
+    }catch(e){
+      show("Error: "+e,0);
     }
-
-    const mb = file.size / (1024 * 1024);
-    if (mb > MAX_MB) {
-      return show(`La imagen pesa ${mb.toFixed(2)} MB. Máximo permitido: ${MAX_MB} MB.`, "err");
-    }
-
-    btn.disabled = true;
-    show("Subiendo…", "");
-
-    try {
-      if (!WEBHOOK_URL || WEBHOOK_URL.includes("PEGAR_AQUI")) {
-        throw new Error("Tenés que pegar tu WEBHOOK_URL de n8n en el código (arriba).");
-      }
-
-      const base64 = await readAsDataURL(file);
-
-      const payload = {
-        fileName: file.name,
-        mimeType: file.type,
-        base64 // data:image/...;base64,....
-      };
-
-      const { res, raw, data } = await postJson(payload);
-
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}. Respuesta: ${raw.slice(0, 1000)}`);
-      }
-
-      // Si n8n devuelve JSON, lo mostramos; si no, mostramos texto
-      if (data && typeof data === "object") {
-        show(
-          `✅ OK<br>` +
-          (data.rows != null ? `Filas agregadas: <b>${data.rows}</b><br>` : "") +
-          (data.fileUrl ? `Drive: <a href="${data.fileUrl}" target="_blank" rel="noreferrer">${data.fileUrl}</a><br>` : "") +
-          `<code>${JSON.stringify(data, null, 2)}</code>`,
-          "ok"
-        );
-      } else {
-        show(`✅ OK<br><code>${raw.slice(0, 1500)}</code>`, "ok");
-      }
-
-      fileInput.value = "";
-
-    } catch (e) {
-      show(`❌ Error al subir.<br><code>${String(e.message || e)}</code>`, "err");
-    } finally {
-      btn.disabled = false;
-    }
-  });
+  };
+  r.readAsDataURL(f);
+}
 </script>
+
 </body>
 </html>
